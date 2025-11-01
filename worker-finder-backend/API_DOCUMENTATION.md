@@ -52,7 +52,7 @@
 **Request Body:**
 ```json
 {
-  "mobile": "9876543210",
+  "identifier": "user@example.com",  // or mobile number
   "otp": "123456"
 }
 ```
@@ -82,7 +82,7 @@
 **Request Body:**
 ```json
 {
-  "mobile": "9876543210"
+  "identifier": "user@example.com"  // or mobile number
 }
 ```
 

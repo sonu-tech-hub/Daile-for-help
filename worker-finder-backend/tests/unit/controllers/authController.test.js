@@ -73,7 +73,7 @@ describe('Auth Controller', () => {
       expect(mockRes.json).toHaveBeenCalledWith(
         expect.objectContaining({
           success: true,
-          message: 'Registration successful. Please verify OTP sent to your mobile.'
+          message: 'Registration successful. Please verify OTP sent to your email.'
         })
       );
     });
@@ -128,7 +128,12 @@ describe('Auth Controller', () => {
 
   describe('verifyOTP', () => {
     it('should verify OTP successfully', async () => {
-      mockReq.body = { mobile: '1234567890', otp: '123456' };
+      mockReq.body = { identifier: '1234567890', otp: '123456' };
+
+      const mockUser = {
+        id: 1,
+        is_verified: false
+      };
 
       const mockOtp = {
         id: 1,
@@ -138,7 +143,7 @@ describe('Auth Controller', () => {
         expires_at: new Date(Date.now() + 1000000)
       };
 
-      const mockUser = {
+      const mockUserDetails = {
         id: 1,
         email: 'test@example.com',
         mobile: '1234567890',
@@ -147,10 +152,11 @@ describe('Auth Controller', () => {
       };
 
       promisePool.query
+        .mockResolvedValueOnce([[mockUser]]) // User exists check
         .mockResolvedValueOnce([[mockOtp]]) // OTP found
         .mockResolvedValueOnce([]) // OTP marked as used
         .mockResolvedValueOnce([]) // User verified
-        .mockResolvedValueOnce([[mockUser]]); // User details
+        .mockResolvedValueOnce([[mockUserDetails]]); // User details
 
       const { generateToken, generateRefreshToken, sanitizeUser } = require('../../../src/utils/helpers');
       generateToken.mockReturnValue('jwt_token');
@@ -175,9 +181,11 @@ describe('Auth Controller', () => {
     });
 
     it('should return error for invalid OTP', async () => {
-      mockReq.body = { mobile: '1234567890', otp: '123456' };
+      mockReq.body = { identifier: '1234567890', otp: '123456' };
 
-      promisePool.query.mockResolvedValueOnce([[]]); // No OTP found
+      promisePool.query
+        .mockResolvedValueOnce([[{ id: 1, is_verified: false }]]) // User exists
+        .mockResolvedValueOnce([[]]); // No OTP found
 
       await authController.verifyOTP(mockReq, mockRes);
 

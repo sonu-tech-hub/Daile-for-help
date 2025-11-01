@@ -49,9 +49,9 @@ const validateLogin = [
 
 // OTP validation
 const validateOTP = [
-  body('mobile')
-    .matches(/^[6-9]\d{9}$/)
-    .withMessage('Valid 10-digit Indian mobile number is required'),
+  body('identifier')
+    .notEmpty()
+    .withMessage('Email or mobile number is required'),
   body('otp')
     .isLength({ min: 6, max: 6 })
     .isNumeric()

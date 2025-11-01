@@ -2,6 +2,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
+const twilio = require('twilio');
 
 // Configure nodemailer
 const transporter = nodemailer.createTransport({
@@ -11,6 +12,9 @@ const transporter = nodemailer.createTransport({
     pass: process.env.EMAIL_PASSWORD
   }
 });
+
+// Configure Twilio
+const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
 // Hash password
 const hashPassword = async (password) => {
@@ -25,20 +29,48 @@ const comparePassword = async (password, hashedPassword) => {
 
 // Generate JWT token
 const generateToken = (userId, userType) => {
-  return jwt.sign(
-    { userId, userType },
-    process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRE || '24h' }
-  );
+  try {
+    if (!process.env.JWT_SECRET) {
+      console.error('JWT_SECRET is not configured in environment variables');
+      throw new Error('JWT configuration error');
+    }
+
+    console.log(`🔑 Generating access token for user ${userId} (${userType})`);
+    const token = jwt.sign(
+      { userId, userType },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
+    );
+    
+    console.log(`✅ Access token generated successfully for user ${userId}`);
+    return token;
+  } catch (error) {
+    console.error('❌ Failed to generate access token:', error);
+    throw new Error(`Token generation failed: ${error.message}`);
+  }
 };
 
 // Generate refresh token
 const generateRefreshToken = (userId) => {
-  return jwt.sign(
-    { userId },
-    process.env.JWT_REFRESH_SECRET,
-    { expiresIn: process.env.JWT_REFRESH_EXPIRE || '30d' }
-  );
+  try {
+    if (!process.env.JWT_REFRESH_SECRET) {
+      console.error('JWT_REFRESH_SECRET is not configured in environment variables');
+      throw new Error('JWT refresh configuration error');
+    }
+
+    console.log(`🔄 Generating refresh token for user ${userId}`);
+    const token = jwt.sign(
+      { userId },
+      process.env.JWT_REFRESH_SECRET,
+      { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d' }
+    );
+
+    console.log(`✅ Refresh token generated successfully for user ${userId}`);
+    return token;
+  } catch (error) {
+    console.error('❌ Failed to generate refresh token:', error);
+    throw new Error(`Refresh token generation failed: ${error.message}`);
+  }
 };
 
 // Generate OTP (6 digits)
@@ -109,36 +141,58 @@ const paginate = (page = 1, limit = 10) => {
   };
 };
 
-// Send OTP via email
-const sendOTP = async (email, otp, purpose = 'verification') => {
+// Send OTP via email or SMS
+const sendOTP = async (identifier, otp, purpose = 'verification') => {
   try {
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: email,
-      subject: `Your OTP for ${purpose}`,
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #333;">Worker Finder - Verification Code</h2>
-          <p>Hello,</p>
-          <p>Your verification code for ${purpose} is:</p>
-          <h1 style="color: #4CAF50; font-size: 32px; letter-spacing: 5px; text-align: center; padding: 20px; background: #f5f5f5; border-radius: 5px;">${otp}</h1>
-          <p>This code will expire in 10 minutes.</p>
-          <p style="color: #666; font-size: 12px;">If you didn't request this code, please ignore this email.</p>
-        </div>
-      `
-    };
+    // Check if identifier is email or mobile
+    const isEmail = identifier.includes('@');
 
-    const info = await transporter.sendMail(mailOptions);
-    console.log('📧 Email sent successfully:', info.messageId);
+    if (isEmail) {
+      // Send via email
+      const mailOptions = {
+        from: process.env.EMAIL_USER,
+        to: identifier,
+        subject: `Your OTP for ${purpose}`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #333;">Worker Finder - Verification Code</h2>
+            <p>Hello,</p>
+            <p>Your verification code for ${purpose} is:</p>
+            <h1 style="color: #4CAF50; font-size: 32px; letter-spacing: 5px; text-align: center; padding: 20px; background: #f5f5f5; border-radius: 5px;">${otp}</h1>
+            <p>This code will expire in 10 minutes.</p>
+            <p style="color: #666; font-size: 12px;">If you didn't request this code, please ignore this email.</p>
+          </div>
+        `
+      };
 
-    return {
-      success: true,
-      message: `OTP sent successfully to ${email}`,
-      messageId: info.messageId,
-      otp: process.env.NODE_ENV === 'development' ? otp : undefined // Only show in dev
-    };
+      const info = await transporter.sendMail(mailOptions);
+      console.log('📧 Email sent successfully:', info.messageId);
+
+      return {
+        success: true,
+        message: `OTP sent successfully to ${identifier}`,
+        messageId: info.messageId,
+        otp: process.env.NODE_ENV === 'development' ? otp : undefined // Only show in dev
+      };
+    } else {
+      // Send via SMS
+      const message = await twilioClient.messages.create({
+        body: `Your Worker Finder verification code is: ${otp}. This code will expire in 10 minutes.`,
+        from: process.env.TWILIO_PHONE_NUMBER,
+        to: identifier
+      });
+
+      console.log('📱 SMS sent successfully:', message.sid);
+
+      return {
+        success: true,
+        message: `OTP sent successfully to ${identifier}`,
+        messageId: message.sid,
+        otp: process.env.NODE_ENV === 'development' ? otp : undefined // Only show in dev
+      };
+    }
   } catch (error) {
-    console.error('Email sending failed:', error);
+    console.error('OTP sending failed:', error);
     throw {
       success: false,
       message: 'Failed to send OTP',
