@@ -22,7 +22,11 @@ router.post(
   '/profile-photo',
   verifyToken,
   isWorker,
-  uploadProfilePhoto.single('photo'),
+  // accept either 'photo' or 'image' field to be tolerant of client variations
+  uploadProfilePhoto.fields([
+    { name: 'photo', maxCount: 1 },
+    { name: 'image', maxCount: 1 }
+  ]),
   workerController.uploadProfilePhoto
 );
 

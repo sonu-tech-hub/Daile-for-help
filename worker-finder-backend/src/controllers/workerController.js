@@ -2,10 +2,13 @@ const { promisePool } = require('../config/database');
 const { uploadToCloudinary, deleteFromCloudinary } = require('../config/cloudinary');
 const { calculateDistance, paginate } = require('../utils/helpers');
 
+const isDev = process.env.NODE_ENV === 'development';
+
 // Create/Update worker profile
 const updateWorkerProfile = async (req, res) => {
   try {
     const userId = req.user.id;
+    if (isDev) console.log('updateWorkerProfile:start', { userId, bodyKeys: Object.keys(req.body) });
     const {
       full_name,
       whatsapp_number,
@@ -28,7 +31,7 @@ const updateWorkerProfile = async (req, res) => {
     const parsedSkills = typeof skills === 'string' ? JSON.parse(skills) : skills;
     const parsedCertifications = typeof certifications === 'string' ? JSON.parse(certifications) : certifications;
     
-    // Update profile
+  // Update profile
     const [result] = await promisePool.query(
       `UPDATE worker_profiles SET 
         full_name = ?,
@@ -61,7 +64,9 @@ const updateWorkerProfile = async (req, res) => {
       'SELECT * FROM worker_profiles WHERE user_id = ?',
       [userId]
     );
-    
+
+    if (isDev) console.log('updateWorkerProfile:dbResult', { affectedRows: result.affectedRows, profileFound: profiles.length > 0 });
+
     res.json({
       success: true,
       message: 'Profile updated successfully',
@@ -69,10 +74,12 @@ const updateWorkerProfile = async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Update worker profile error:', error);
+    console.error('Update worker profile error:', error.message);
+    if (isDev) console.error(error.stack);
     res.status(500).json({
       success: false,
-      message: 'Failed to update profile'
+      message: 'Failed to update profile',
+      error: isDev ? error.message : undefined
     });
   }
 };
@@ -81,8 +88,17 @@ const updateWorkerProfile = async (req, res) => {
 const uploadProfilePhoto = async (req, res) => {
   try {
     const userId = req.user.id;
-    
-    if (!req.file) {
+    if (isDev) console.log('uploadProfilePhoto:start', { userId, hasFile: !!req.file });
+    // multer may populate req.file (single) or req.files (fields)
+    let file = req.file;
+    if (!file && req.files) {
+      // check common field names
+      if (req.files.photo && req.files.photo.length > 0) file = req.files.photo[0];
+      else if (req.files.image && req.files.image.length > 0) file = req.files.image[0];
+    }
+
+    if (!file) {
+      if (isDev) console.warn('uploadProfilePhoto:no file in request', { filesPresent: !!req.files });
       return res.status(400).json({
         success: false,
         message: 'No file uploaded'
@@ -94,17 +110,21 @@ const uploadProfilePhoto = async (req, res) => {
       'SELECT profile_photo FROM worker_profiles WHERE user_id = ?',
       [userId]
     );
+    if (isDev) console.log('uploadProfilePhoto:existingProfile', { profileExists: profiles.length > 0, existingPhoto: profiles[0]?.profile_photo });
     
     // Upload to Cloudinary
-    const result = await uploadToCloudinary(req.file.buffer, 'profiles', `worker_${userId}`);
+    const result = await uploadToCloudinary(file.buffer, 'profiles', `worker_${userId}`);
+    if (isDev) console.log('uploadProfilePhoto:cloudinaryResult', { url: result.secure_url, public_id: result.public_id });
     
     // Delete old photo if exists
     if (profiles[0]?.profile_photo) {
       try {
         const publicId = profiles[0].profile_photo.split('/').pop().split('.')[0];
         await deleteFromCloudinary(`worker-finder/profiles/${publicId}`);
+        if (isDev) console.log('uploadProfilePhoto:deletedOldPhoto', { publicId });
       } catch (err) {
-        console.error('Error deleting old photo:', err);
+        console.error('Error deleting old photo:', err.message);
+        if (isDev) console.error(err.stack);
       }
     }
     
@@ -124,10 +144,12 @@ const uploadProfilePhoto = async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Upload profile photo error:', error);
+    console.error('Upload profile photo error:', error.message);
+    if (isDev) console.error(error.stack);
     res.status(500).json({
       success: false,
-      message: 'Failed to upload photo'
+      message: 'Failed to upload photo',
+      error: isDev ? error.message : undefined
     });
   }
 };
@@ -136,8 +158,10 @@ const uploadProfilePhoto = async (req, res) => {
 const uploadVerificationProof = async (req, res) => {
   try {
     const userId = req.user.id;
+    if (isDev) console.log('uploadVerificationProof:start', { userId, hasFile: !!req.file });
     
     if (!req.file) {
+      if (isDev) console.warn('uploadVerificationProof:no file in request');
       return res.status(400).json({
         success: false,
         message: 'No file uploaded'
@@ -146,6 +170,7 @@ const uploadVerificationProof = async (req, res) => {
     
     // Upload to Cloudinary
     const result = await uploadToCloudinary(req.file.buffer, 'verification', `proof_${userId}`);
+    if (isDev) console.log('uploadVerificationProof:cloudinaryResult', { url: result.secure_url });
     
     // Update database
     await promisePool.query(
@@ -162,10 +187,12 @@ const uploadVerificationProof = async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Upload verification proof error:', error);
+    console.error('Upload verification proof error:', error.message);
+    if (isDev) console.error(error.stack);
     res.status(500).json({
       success: false,
-      message: 'Failed to upload verification proof'
+      message: 'Failed to upload verification proof',
+      error: isDev ? error.message : undefined
     });
   }
 };
@@ -173,7 +200,20 @@ const uploadVerificationProof = async (req, res) => {
 // Get worker profile (public)
 const getWorkerProfile = async (req, res) => {
   try {
-    const { workerId } = req.params;
+    const rawWorkerId = req.params.workerId;
+    if (isDev) console.log('getWorkerProfile:start', { rawWorkerId });
+
+    // Sanitize workerId: some clients mistakenly send a leading ':' (e.g. '/api/workers/:23')
+    // Strip a leading colon and validate the ID.
+    const workerId = typeof rawWorkerId === 'string' ? rawWorkerId.replace(/^:/, '') : rawWorkerId;
+
+    if (!workerId || !/^\d+$/.test(String(workerId))) {
+      if (isDev) console.warn('getWorkerProfile:invalid workerId', { rawWorkerId, workerId });
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid workerId parameter. Use the numeric id (e.g. /api/workers/23)'
+      });
+    }
     
     // Get worker profile with user details
     const [workers] = await promisePool.query(
@@ -216,7 +256,8 @@ const getWorkerProfile = async (req, res) => {
       [workerId]
     );
     
-    const workerData = workers[0];
+  const workerData = workers[0];
+  if (isDev) console.log('getWorkerProfile:workerDataLoaded', { workerId, reviewsCount: reviews.length });
     
     // Parse JSON fields
     workerData.skills = workerData.skills ? JSON.parse(workerData.skills) : [];
@@ -232,10 +273,12 @@ const getWorkerProfile = async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Get worker profile error:', error);
+    console.error('Get worker profile error:', error.message);
+    if (isDev) console.error(error.stack);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch worker profile'
+      message: 'Failed to fetch worker profile',
+      error: isDev ? error.message : undefined
     });
   }
 };
@@ -243,6 +286,7 @@ const getWorkerProfile = async (req, res) => {
 // Search workers (location-based with filters)
 const searchWorkers = async (req, res) => {
   try {
+    if (isDev) console.log('searchWorkers:start', { query: req.query });
     const {
       latitude,
       longitude,
@@ -333,7 +377,8 @@ const searchWorkers = async (req, res) => {
     query += ' LIMIT ? OFFSET ?';
     params.push(limitNum, offset);
     
-    const [workers] = await promisePool.query(query, params);
+  const [workers] = await promisePool.query(query, params);
+  if (isDev) console.log('searchWorkers:db', { fetched: workers.length, params });
     
     // Parse JSON fields
     workers.forEach(worker => {
@@ -382,7 +427,8 @@ const searchWorkers = async (req, res) => {
       countParams.push(availability_status);
     }
     
-    const [countResult] = await promisePool.query(countQuery, countParams);
+  const [countResult] = await promisePool.query(countQuery, countParams);
+  if (isDev) console.log('searchWorkers:count', { total: countResult[0].total });
     const total = countResult[0].total;
     
     res.json({
@@ -410,10 +456,12 @@ const searchWorkers = async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Search workers error:', error);
+    console.error('Search workers error:', error.message);
+    if (isDev) console.error(error.stack);
     res.status(500).json({
       success: false,
-      message: 'Failed to search workers'
+      message: 'Failed to search workers',
+      error: isDev ? error.message : undefined
     });
   }
 };
@@ -422,6 +470,7 @@ const searchWorkers = async (req, res) => {
 const getWorkerStats = async (req, res) => {
   try {
     const userId = req.user.id;
+    if (isDev) console.log('getWorkerStats:start', { userId });
     
     // Get profile with stats
     const [profiles] = await promisePool.query(
@@ -463,9 +512,11 @@ const getWorkerStats = async (req, res) => {
       [userId]
     );
     
-    const profile = profiles[0];
+    const profile = profiles[0] || {};
     profile.skills = profile.skills ? JSON.parse(profile.skills) : [];
     profile.certifications = profile.certifications ? JSON.parse(profile.certifications) : [];
+    
+    if (isDev) console.log('getWorkerStats:db', { profileFound: !!profiles[0], jobStats: jobStats[0], recentReviews: recentReviews.length, monthlyEarnings: earnings[0].monthly_earnings });
     
     res.json({
       success: true,
@@ -482,10 +533,12 @@ const getWorkerStats = async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Get worker stats error:', error);
+    console.error('Get worker stats error:', error.message);
+    if (isDev) console.error(error.stack);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch worker stats'
+      message: 'Failed to fetch worker stats',
+      error: isDev ? error.message : undefined
     });
   }
 };
