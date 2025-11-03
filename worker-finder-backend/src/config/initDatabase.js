@@ -353,6 +353,24 @@ const initDatabase = async () => {
   }
 };
 
+ await connection.query(`CREATE TABLE IF NOT EXISTS job_applications (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  job_id INT NOT NULL,
+  worker_id INT NOT NULL,
+  proposal_message TEXT NOT NULL,
+  quoted_price DECIMAL(10,2),
+  status ENUM('pending', 'accepted', 'rejected') DEFAULT 'pending',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
+  FOREIGN KEY (worker_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_job (job_id),
+  INDEX idx_worker (worker_id),
+  INDEX idx_status (status),
+  UNIQUE KEY unique_job_worker (job_id, worker_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+ `)
+
 // Run initialization
 initDatabase()
   .then(() => {

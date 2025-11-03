@@ -53,12 +53,20 @@ const createReview = async (req, res) => {
       ]
     );
     
-    // Update average rating for reviewee
+    // Verify reviewee exists and update average rating
     const [revieweeUser] = await connection.query(
       'SELECT user_type FROM users WHERE id = ?',
       [reviewee_id]
     );
-    
+
+    if (!revieweeUser || revieweeUser.length === 0) {
+      await connection.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Reviewee user not found'
+      });
+    }
+
     await updateAverageRating(reviewee_id, revieweeUser[0].user_type, connection);
     
     await connection.commit();
@@ -86,7 +94,13 @@ const createReview = async (req, res) => {
 // Get reviews for a user
 const getUserReviews = async (req, res) => {
   try {
-    const { userId } = req.params;
+    const rawUserId = req.params.userId;
+    // sanitize possible leading colon (clients sometimes send ':23')
+    const userId = typeof rawUserId === 'string' ? rawUserId.replace(/^:/, '') : rawUserId;
+    if (!userId || !/^\d+$/.test(String(userId))) {
+      return res.status(400).json({ success: false, message: 'Invalid userId parameter. Use numeric id (e.g. /api/reviews/user/23)' });
+    }
+    const parsedUserId = parseInt(userId, 10);
     const { page = 1, limit = 20 } = req.query;
     
     const limitNum = Math.min(100, parseInt(limit));
@@ -113,7 +127,7 @@ const getUserReviews = async (req, res) => {
       WHERE r.reviewee_id = ?
       ORDER BY r.created_at DESC
       LIMIT ? OFFSET ?`,
-      [userId, limitNum, offset]
+      [parsedUserId, limitNum, offset]
     );
     
     // Parse photos JSON
@@ -132,10 +146,15 @@ const getUserReviews = async (req, res) => {
         SUM(CASE WHEN rating = 2 THEN 1 ELSE 0 END) as two_star,
         SUM(CASE WHEN rating = 1 THEN 1 ELSE 0 END) as one_star
       FROM reviews WHERE reviewee_id = ?`,
-      [userId]
+      [parsedUserId]
     );
-    
-    res.json({
+    // Dev-time debug: if requested, include raw DB counts/sample to help diagnose
+    const debugRequested = String(req.query.debug).toLowerCase() === 'true' || String(req.query.debug) === '1';
+
+    // Log basic counts to server console for quick debugging
+  console.log(`getUserReviews: userId=${parsedUserId} page=${page} limit=${limitNum} offset=${offset} reviews=${reviews.length} total=${stats[0].total}`);
+
+    const responsePayload = {
       success: true,
       data: {
         reviews,
@@ -157,7 +176,16 @@ const getUserReviews = async (req, res) => {
           total_pages: Math.ceil(stats[0].total / limitNum)
         }
       }
-    });
+    };
+
+    if (debugRequested && process.env.NODE_ENV === 'development') {
+      responsePayload.debug = {
+        queryParams: { userId: parsedUserId, page, limit: limitNum, offset },
+        sampleReview: reviews.length > 0 ? reviews[0] : null
+      };
+    }
+
+    res.json(responsePayload);
     
   } catch (error) {
     console.error('Get user reviews error:', error);
@@ -195,7 +223,12 @@ const markReviewHelpful = async (req, res) => {
 // Get review by job ID
 const getJobReview = async (req, res) => {
   try {
-    const { jobId } = req.params;
+    const rawJobId = req.params.jobId;
+    const jobId = typeof rawJobId === 'string' ? rawJobId.replace(/^:/, '') : rawJobId;
+    if (!jobId || !/^\d+$/.test(String(jobId))) {
+      return res.status(400).json({ success: false, message: 'Invalid jobId parameter. Use numeric id (e.g. /api/reviews/job/23)' });
+    }
+    const parsedJobId = parseInt(jobId, 10);
     const userId = req.user.id;
     
     const [reviews] = await promisePool.query(
@@ -204,7 +237,7 @@ const getJobReview = async (req, res) => {
       FROM reviews r
       JOIN users u ON r.reviewer_id = u.id
       WHERE r.job_id = ?`,
-      [jobId]
+      [parsedJobId]
     );
     
     // Parse photos
@@ -213,7 +246,7 @@ const getJobReview = async (req, res) => {
     });
     
     // Check if current user can still review
-    const reviewCheck = await canReview(jobId, userId, promisePool);
+  const reviewCheck = await canReview(parsedJobId, userId, promisePool);
     
     res.json({
       success: true,

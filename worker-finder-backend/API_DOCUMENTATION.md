@@ -814,3 +814,670 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
 
 Token expires in 24 hours by default. Use the refresh token to get a new access token.
+
+
+# 🧪 Job System - Complete Testing Guide
+
+## Overview
+This document provides step-by-step testing for the complete job/hiring workflow.
+
+## Test Flow Overview
+```
+1. Seeker creates job posting (open or direct hire)
+2. Workers apply for the job
+3. Seeker reviews applications
+4. Seeker accepts one application
+5. Worker starts job (in_progress)
+6. Worker completes job
+7. Both parties can now review each other
+```
+
+---
+
+## Prerequisites
+
+- Server running at `http://localhost:5000`
+- Two registered accounts:
+  - **Seeker account** (user_type: seeker)
+  - **Worker account** (user_type: worker)
+- Both accounts verified and logged in
+- Save tokens for both accounts
+
+---
+
+## Test Suite
+
+### ✅ TEST 1: Create Open Job (Seeker)
+<!-- --------------------------------------- -->
+<!---------------------------------------------->
+**Endpoint:** `POST /api/jobs`  
+**Authorization:** Bearer {seeker_token}
+
+**Request Body:**
+```json
+{
+  "title": "Need Plumber for Kitchen Sink Repair",
+  "description": "Kitchen sink is leaking. Need urgent repair. Should complete within 2 hours.",
+  "category_id": 1,
+  "budget": 1500,
+  "location": "Connaught Place, Delhi",
+  "latitude": 28.6139,
+  "longitude": 77.2090,
+  "scheduled_date": "2024-12-25T10:00:00"
+}
+```
+
+**Expected Response (201):**
+```json
+{
+  "success": true,
+  "message": "Job posted successfully",
+  "data": {
+    "job_id": 1,
+    "status": "open",
+    "commission_details": {
+      "amount": 1500,
+      "commission": 270,
+      "trustFee": 105,
+      "netAmount": 1125
+    }
+  }
+}
+```
+
+**✓ Pass Criteria:**
+- Status code 201
+- Job ID returned
+- Status is "open"
+- Commission calculated correctly
+
+---
+
+### ✅ TEST 2: Create Direct Hire Job (Seeker)
+
+**Endpoint:** `POST /api/jobs`  
+**Authorization:** Bearer {seeker_token}
+
+**Request Body:**
+```json
+{
+  "title": "Electrical Wiring for New Room",
+  "description": "Need to install electrical points in newly constructed room",
+  "category_id": 2,
+  "budget": 3000,
+  "worker_id": 5,
+  "location": "South Delhi",
+  "latitude": 28.5355,
+  "longitude": 77.3910,
+  "scheduled_date": "2024-12-26T09:00:00"
+}
+```
+
+**Expected Response (201):**
+```json
+{
+  "success": true,
+  "message": "Job created and assigned to worker",
+  "data": {
+    "job_id": 2,
+    "status": "assigned",
+    "commission_details": {...}
+  }
+}
+```
+
+**✓ Pass Criteria:**
+- Job directly assigned to worker
+- Worker receives notification
+- Status is "assigned" (not "open")
+
+---
+
+### ✅ TEST 3: View All Open Jobs (Worker)
+
+**Endpoint:** `GET /api/jobs?status=open`  
+**Authorization:** Not required (public endpoint)
+
+**Query Parameters:**
+- `status=open`
+- `latitude=28.6139` (optional)
+- `longitude=77.2090` (optional)
+- `radius=25` (optional)
+- `category_id=1` (optional)
+
+**Expected Response (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "jobs": [
+      {
+        "id": 1,
+        "title": "Need Plumber for Kitchen Sink Repair",
+        "description": "...",
+        "budget": 1500,
+        "status": "open",
+        "location": "Connaught Place, Delhi",
+        "distance": 2.5,
+        "seeker_name": "Jane Smith",
+        "category_name": "Plumber",
+        ...
+      }
+    ],
+    "pagination": {...}
+  }
+}
+```
+
+**✓ Pass Criteria:**
+- Only open jobs returned
+- Distance calculated if location provided
+- Sorted by distance (nearest first)
+
+---
+
+### ✅ TEST 4: Worker Applies for Job
+
+**Endpoint:** `POST /api/jobs/1/apply`  
+**Authorization:** Bearer {worker_token}
+
+**Request Body:**
+```json
+{
+  "proposal_message": "Hello! I am an experienced plumber with 5+ years of experience. I have fixed similar kitchen sink issues many times. I can complete this job within 2 hours as required. I have all necessary tools.",
+  "quoted_price": 1400
+}
+```
+
+**Expected Response (201):**
+```json
+{
+  "success": true,
+  "message": "Application submitted successfully",
+  "data": {
+    "application_id": 1
+  }
+}
+```
+
+**✓ Pass Criteria:**
+- Application created
+- Seeker receives notification
+- Cannot apply twice for same job
+
+---
+
+### ✅ TEST 5: Multiple Workers Apply
+
+Repeat TEST 4 with different worker accounts:
+
+**Worker 2:** quoted_price: 1500  
+**Worker 3:** quoted_price: 1300  
+**Worker 4:** quoted_price: 1450
+
+**✓ Pass Criteria:**
+- All applications accepted
+- Each worker can only apply once
+
+---
+
+### ✅ TEST 6: Seeker Views Applications
+
+**Endpoint:** `GET /api/jobs/1/applications`  
+**Authorization:** Bearer {seeker_token}
+
+**Expected Response (200):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "job_id": 1,
+      "worker_id": 5,
+      "worker_name": "John Doe",
+      "worker_photo": "https://...",
+      "profession": "Plumber",
+      "experience_years": 5.5,
+      "average_rating": 4.8,
+      "total_jobs_completed": 45,
+      "proposal_message": "Hello! I am an experienced...",
+      "quoted_price": 1400,
+      "status": "pending",
+      "created_at": "2024-01-15 10:30:00"
+    },
+    ...
+  ]
+}
+```
+
+**✓ Pass Criteria:**
+- All applications shown
+- Worker details included
+- Sorted by application date
+
+---
+
+### ✅ TEST 7: Seeker Accepts Application
+
+**Endpoint:** `PUT /api/jobs/applications/1/accept`  
+**Authorization:** Bearer {seeker_token}
+
+**Expected Response (200):**
+```json
+{
+  "success": true,
+  "message": "Worker assigned successfully",
+  "data": {
+    "job_id": 1,
+    "worker_id": 5
+  }
+}
+```
+
+**✓ Pass Criteria:**
+- Job status changes to "assigned"
+- Worker assigned to job
+- Other applications automatically rejected
+- Accepted worker receives notification
+- Rejected workers receive notifications
+
+---
+
+### ✅ TEST 8: Verify Job Assignment
+
+**Endpoint:** `GET /api/jobs/1`
+
+**Expected Response (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "id": 1,
+    "status": "assigned",
+    "worker_id": 5,
+    "worker_name": "John Doe",
+    "seeker_name": "Jane Smith",
+    ...
+  }
+}
+```
+
+**✓ Pass Criteria:**
+- Status is "assigned"
+- Worker details visible
+- Budget updated to quoted price
+
+---
+
+### ✅ TEST 9: Worker Starts Job
+
+**Endpoint:** `PUT /api/jobs/1/status`  
+**Authorization:** Bearer {worker_token}
+
+**Request Body:**
+```json
+{
+  "status": "in_progress"
+}
+```
+
+**Expected Response (200):**
+```json
+{
+  "success": true,
+  "message": "Job status updated to in_progress",
+  "data": {
+    "job_id": 1,
+    "status": "in_progress"
+  }
+}
+```
+
+**✓ Pass Criteria:**
+- Status changes to "in_progress"
+- Seeker receives notification
+- Cannot change to invalid status
+
+---
+
+### ✅ TEST 10: Worker Completes Job
+
+**Endpoint:** `PUT /api/jobs/1/status`  
+**Authorization:** Bearer {worker_token}
+
+**Request Body:**
+```json
+{
+  "status": "completed",
+  "completion_notes": "Successfully fixed the kitchen sink leak. Replaced old gasket and tightened all connections. Tested for 30 minutes - no leaks."
+}
+```
+
+**Expected Response (200):**
+```json
+{
+  "success": true,
+  "message": "Job status updated to completed",
+  "data": {
+    "job_id": 1,
+    "status": "completed"
+  }
+}
+```
+
+**✓ Pass Criteria:**
+- Status changes to "completed"
+- `completion_date` set
+- `payment_status` set to "pending"
+- Worker's `total_jobs_completed` incremented
+- Worker's `total_earnings` updated
+- Seeker's `total_amount_spent` updated
+- Both parties receive notification
+
+---
+
+### ✅ TEST 11: Verify Job Completion Stats
+
+**Endpoint:** `GET /api/workers/dashboard/stats`  
+**Authorization:** Bearer {worker_token}
+
+**✓ Pass Criteria:**
+- `completed_jobs` count increased
+- `total_earnings` updated
+- Job appears in completed list
+
+**Endpoint:** `GET /api/seekers/dashboard/stats`  
+**Authorization:** Bearer {seeker_token}
+
+**✓ Pass Criteria:**
+- `completed_jobs` count increased
+- `total_amount_spent` updated
+
+---
+
+### ✅ TEST 12: Seeker Reviews Worker (NOW POSSIBLE!)
+
+**Endpoint:** `POST /api/reviews`  
+
+```
+
+**✓ Pass Criteria:**
+- Review created successfully
+- Worker's `average_rating` updated
+- Can only review after job completion
+- Can only review once per job
+
+---
+
+### ✅ TEST 13: Worker Reviews Seeker (TWO-WAY!)
+
+**Endpoint:** `POST /api/reviews`  
+**Authorization:** Bearer {worker_token}
+
+**Request Body:**
+```json
+{
+  "job_id": 1,
+  "reviewee_id": 3,
+  "rating": 5,
+  "review_text": "Great client! Clear instructions and prompt payment. Easy to work with.",
+  "punctuality_rating": 5,
+  "quality_rating": 5,
+  "behavior_rating": 5
+}
+```
+
+**Expected Response (201):**
+```json
+{
+  "success": true,
+  "message": "Review submitted successfully",
+  "data": {
+    "review_id": 2
+  }
+}
+```
+
+**✓ Pass Criteria:**
+- Review created successfully
+- Seeker's `average_rating` updated
+- Both reviews now exist for same job
+
+---
+
+### ✅ TEST 14: Get My Jobs (Worker)
+
+**Endpoint:** `GET /api/jobs/my/jobs`  
+**Authorization:** Bearer {worker_token}
+
+**Expected Response (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "jobs": [
+      {
+        "id": 1,
+        "title": "Need Plumber for Kitchen Sink Repair",
+        "status": "completed",
+        "budget": 1400,
+        "seeker_name": "Jane Smith",
+        ...
+      },
+      {
+        "id": 2,
+        "status": "assigned",
+        ...
+      }
+    ],
+    "pagination": {...}
+  }
+}
+```
+
+**✓ Pass Criteria:**
+- All worker's jobs shown
+- Filterable by status
+- Pagination works
+
+---
+
+### ✅ TEST 15: Get My Jobs (Seeker)
+
+**Endpoint:** `GET /api/jobs/my/jobs`  
+**Authorization:** Bearer {seeker_token}
+
+**Expected Response (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "jobs": [
+      {
+        "id": 1,
+        "title": "Need Plumber for Kitchen Sink Repair",
+        "status": "completed",
+        "worker_name": "John Doe",
+        ...
+      }
+    ],
+    "pagination": {...}
+  }
+}
+```
+
+**✓ Pass Criteria:**
+- All seeker's jobs shown
+- Can filter by status
+
+---
+
+### ✅ TEST 16: Cancel Job
+
+**Endpoint:** `PUT /api/jobs/1/cancel`  
+**Authorization:** Bearer {seeker_token} or {worker_token}
+
+**Request Body:**
+```json
+{
+  "cancellation_reason": "Unable to proceed due to unavailability"
+}
+```
+
+**Expected Response (200):**
+```json
+{
+  "success": true,
+  "message": "Job cancelled successfully"
+}
+```
+
+**✓ Pass Criteria:**
+- Status changes to "cancelled"
+- Other party receives notification
+- Cannot cancel completed jobs
+
+---
+
+### ✅ TEST 17: Error Cases
+
+#### Test 17.1: Review Without Job Completion
+**Endpoint:** `POST /api/reviews`  
+**Expected:** 400 - "Job not completed yet"
+
+#### Test 17.2: Apply for Assigned Job
+**Endpoint:** `POST /api/jobs/2/apply`  
+**Expected:** 404 - "Job not found or not available"
+
+#### Test 17.3: Double Application
+**Endpoint:** `POST /api/jobs/1/apply` (apply again)  
+**Expected:** 400 - "You have already applied for this job"
+
+#### Test 17.4: Invalid Status Transition
+**Endpoint:** `PUT /api/jobs/1/status`  
+**Body:** `{"status": "in_progress"}` (from "open")  
+**Expected:** 400 - "Cannot change status..."
+
+#### Test 17.5: Unauthorized Access
+**Endpoint:** `GET /api/jobs/1/applications`  
+**Authorization:** Worker token (not seeker)  
+**Expected:** 403 - "Unauthorized access"
+
+---
+
+## Test Summary Checklist
+
+### Job Creation
+- [ ] Seeker can create open job
+- [ ] Seeker can create direct hire job
+- [ ] Commission calculated correctly
+- [ ] Location saved properly
+
+### Job Application
+- [ ] Worker can view open jobs
+- [ ] Worker can apply for jobs
+- [ ] Cannot apply twice
+- [ ] Seeker receives notification
+
+### Application Management
+- [ ] Seeker can view all applications
+- [ ] Seeker can accept application
+- [ ] Job assigned to worker
+- [ ] Other applications rejected
+- [ ] Notifications sent
+
+### Job Progress
+- [ ] Worker can start job (in_progress)
+- [ ] Worker can complete job
+- [ ] Stats updated correctly
+- [ ] Payment status set
+
+### Review System
+- [ ] Can only review completed jobs
+- [ ] Seeker can review worker
+- [ ] Worker can review seeker
+- [ ] Ratings calculated correctly
+- [ ] Cannot review twice
+
+### My Jobs
+- [ ] Worker sees their jobs
+- [ ] Seeker sees their jobs
+- [ ] Filtering works
+- [ ] Pagination works
+
+### Job Cancellation
+- [ ] Either party can cancel
+- [ ] Cannot cancel completed
+- [ ] Notifications sent
+
+### Error Handling
+- [ ] Proper error messages
+- [ ] Status validations
+- [ ] Authorization checks
+- [ ] Duplicate prevention
+
+---
+
+## Testing Tools
+
+### Using cURL
+
+```bash
+# Set variables
+SEEKER_TOKEN="your_seeker_token_here"
+WORKER_TOKEN="your_worker_token_here"
+BASE_URL="http://localhost:5000/api"
+
+# Create job
+curl -X POST $BASE_URL/jobs \
+  -H "Authorization: Bearer $SEEKER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Need Plumber",
+    "description": "Kitchen sink repair needed urgently",
+    "budget": 1500,
+    "category_id": 1
+  }'
+
+# Apply for job
+curl -X POST $BASE_URL/jobs/1/apply \
+  -H "Authorization: Bearer $WORKER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "proposal_message": "I can do this job professionally",
+    "quoted_price": 1400
+  }'
+```
+
+### Using Postman
+
+Import the updated collection (see POSTMAN_COLLECTION_JOBS.json)
+
+---
+
+## Success Criteria
+
+All tests must pass for production readiness:
+
+✅ **Functional Tests**: All 17 test scenarios pass  
+✅ **Error Handling**: All error cases handled properly  
+✅ **Authorization**: Proper access control  
+✅ **Data Integrity**: Stats and relationships correct  
+✅ **Notifications**: All parties notified appropriately  
+✅ **Review System**: Only after job completion  
+
+---
+
+## 🎉 Testing Complete!
+
+When all tests pass, you can confirm:
+- ✅ Complete job workflow working
+- ✅ Review system properly gated
+- ✅ Commission calculations accurate
+- ✅ Two-way rating system functional
+- ✅ Ready for frontend integration
+
+---
+
+**Next Step**: If all tests pass, I'll provide the final code files!

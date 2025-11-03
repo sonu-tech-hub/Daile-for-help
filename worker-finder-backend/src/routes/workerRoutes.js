@@ -45,6 +45,19 @@ router.get(
   workerController.getWorkerStats
 );
 
+// Help clients who accidentally call PUT on this endpoint — return a clear 405
+router.put(
+  '/dashboard/stats',
+  verifyToken,
+  isWorker,
+  (req, res) => {
+    res.status(405).json({
+      success: false,
+      message: 'Method not allowed. Use GET /api/workers/dashboard/stats to fetch dashboard stats.'
+    });
+  }
+);
+
 router.put(
   '/availability',
   verifyToken,

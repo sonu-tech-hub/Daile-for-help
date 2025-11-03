@@ -21,6 +21,7 @@ const messageRoutes = require('./src/routes/messageRoutes');
 const disputeRoutes = require('./src/routes/disputeRoutes');
 const referralRoutes = require('./src/routes/referralRoutes');
 const categoryRoutes = require('./src/routes/categoryRoutes');
+const jobRoutes = require('./src/routes/jobRoutes');
 
 // Initialize express app
 const app = express();
@@ -84,6 +85,7 @@ app.use('/api/messages', messageRoutes);
 app.use('/api/disputes', disputeRoutes);
 app.use('/api/referrals', referralRoutes);
 app.use('/api/categories', categoryRoutes);
+app.use('/api/jobs', jobRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {

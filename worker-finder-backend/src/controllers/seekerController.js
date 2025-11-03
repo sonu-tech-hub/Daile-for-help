@@ -2,6 +2,8 @@ const { promisePool } = require('../config/database');
 const { uploadToCloudinary, deleteFromCloudinary } = require('../config/cloudinary');
 const { paginate } = require('../utils/helpers');
 
+const isDev = process.env.NODE_ENV === 'development';
+
 // Update seeker profile
 const updateSeekerProfile = async (req, res) => {
   try {
@@ -108,8 +110,15 @@ const uploadProfilePhoto = async (req, res) => {
 // Get seeker profile
 const getSeekerProfile = async (req, res) => {
   try {
-    const { seekerId } = req.params;
-    
+    const rawSeekerId = req.params.seekerId;
+    if (isDev) console.log('getSeekerProfile:start', { rawSeekerId });
+
+    const seekerId = typeof rawSeekerId === 'string' ? rawSeekerId.replace(/^:/, '') : rawSeekerId;
+    if (!seekerId || !/^\d+$/.test(String(seekerId))) {
+      if (isDev) console.warn('getSeekerProfile:invalid seekerId', { rawSeekerId, seekerId });
+      return res.status(400).json({ success: false, message: 'Invalid seekerId parameter. Use numeric id (e.g. /api/seekers/23)' });
+    }
+
     const [seekers] = await promisePool.query(
       `SELECT 
         sp.*,
@@ -122,25 +131,21 @@ const getSeekerProfile = async (req, res) => {
       WHERE sp.user_id = ? AND u.is_active = TRUE`,
       [seekerId]
     );
-    
+
     if (seekers.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'Seeker not found'
       });
     }
-    
-    res.json({
-      success: true,
-      data: seekers[0]
-    });
-    
+
+    if (isDev) console.log('getSeekerProfile:found', { seekerId });
+    res.json({ success: true, data: seekers[0] });
+
   } catch (error) {
-    console.error('Get seeker profile error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch seeker profile'
-    });
+    console.error('Get seeker profile error:', error.message);
+    if (isDev) console.error(error.stack);
+    res.status(500).json({ success: false, message: 'Failed to fetch seeker profile', error: isDev ? error.message : undefined });
   }
 };
 
@@ -222,9 +227,18 @@ const getSeekerStats = async (req, res) => {
 // Get job history
 const getJobHistory = async (req, res) => {
   try {
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
     const userId = req.user.id;
-    const { status, page = 1, limit = 20 } = req.query;
-    
+    if (isDev) console.log('getJobHistory:start', { userId, query: req.query });
+
+    // Coerce and validate query params
+    const { status } = req.query;
+    const page = parseInt(req.query.page || '1', 10) || 1;
+    const limit = parseInt(req.query.limit || '20', 10) || 20;
+
     const { limit: limitNum, offset } = paginate(page, limit);
     
     let query = `
@@ -232,11 +246,12 @@ const getJobHistory = async (req, res) => {
         j.*,
         wp.full_name as worker_name,
         wp.profile_photo as worker_photo,
-        wp.profession,
-        wp.mobile as worker_mobile,
+    wp.profession,
+    wu.mobile as worker_mobile,
         c.name as category_name
       FROM jobs j
-      LEFT JOIN worker_profiles wp ON j.worker_id = wp.user_id
+    LEFT JOIN worker_profiles wp ON j.worker_id = wp.user_id
+    LEFT JOIN users wu ON wp.user_id = wu.id
       LEFT JOIN categories c ON j.category_id = c.id
       WHERE j.seeker_id = ?
     `;
@@ -247,11 +262,13 @@ const getJobHistory = async (req, res) => {
       query += ' AND j.status = ?';
       params.push(status);
     }
-    
     query += ' ORDER BY j.created_at DESC LIMIT ? OFFSET ?';
     params.push(limitNum, offset);
-    
+
+    if (isDev) console.log('getJobHistory:runningQuery', { sql: query.replace(/\s+/g, ' '), params });
+
     const [jobs] = await promisePool.query(query, params);
+    if (isDev) console.log('getJobHistory:jobsFetched', { count: jobs.length });
     
     // Get total count
     let countQuery = 'SELECT COUNT(*) as total FROM jobs WHERE seeker_id = ?';
@@ -263,16 +280,17 @@ const getJobHistory = async (req, res) => {
     }
     
     const [countResult] = await promisePool.query(countQuery, countParams);
+    if (isDev) console.log('getJobHistory:count', { total: countResult[0].total });
     
     res.json({
       success: true,
       data: {
         jobs,
         pagination: {
-          page: parseInt(page),
+          page: page,
           limit: limitNum,
           total: countResult[0].total,
-          total_pages: Math.ceil(countResult[0].total / limitNum)
+          total_pages: Math.max(1, Math.ceil(countResult[0].total / limitNum))
         }
       }
     });

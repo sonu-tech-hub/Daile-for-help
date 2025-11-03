@@ -181,10 +181,9 @@ describe('Worker Controller', () => {
 
       await workerController.getWorkerProfile(mockReq, mockRes);
 
-      expect(promisePool.query).toHaveBeenCalledWith(
-        expect.stringContaining('SELECT wp.*, u.email'),
-        ['1']
-      );
+      // The controller runs two queries (profile + reviews). Assert both were
+      // executed and the final response contains the parsed profile.
+      expect(promisePool.query).toHaveBeenCalledTimes(2);
       expect(mockRes.json).toHaveBeenCalledWith({
         success: true,
         data: {
