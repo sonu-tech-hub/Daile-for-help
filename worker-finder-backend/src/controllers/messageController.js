@@ -64,7 +64,13 @@ const sendMessage = async (req, res) => {
 const getConversation = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { otherUserId } = req.params;
+    const rawOtherUserId = req.params.otherUserId;
+    // sanitize possible leading colon (clients sometimes send ':23')
+    const otherUserId = typeof rawOtherUserId === 'string' ? rawOtherUserId.replace(/^:/, '') : rawOtherUserId;
+    if (!otherUserId || !/^\d+$/.test(String(otherUserId))) {
+      return res.status(400).json({ success: false, message: 'Invalid otherUserId parameter. Use numeric id (e.g. /api/messages/conversation/23)' });
+    }
+    const parsedOtherUserId = parseInt(otherUserId, 10);
     const { page = 1, limit = 50 } = req.query;
     
     const { limit: limitNum, offset } = paginate(page, limit);
@@ -87,26 +93,26 @@ const getConversation = async (req, res) => {
         (m.sender_id = ? AND m.receiver_id = ?)
       ORDER BY m.created_at DESC
       LIMIT ? OFFSET ?`,
-      [userId, otherUserId, otherUserId, userId, limitNum, offset]
+      [userId, parsedOtherUserId, parsedOtherUserId, userId, limitNum, offset]
     );
     
     // Mark messages as read
     await promisePool.query(
       'UPDATE messages SET is_read = TRUE WHERE receiver_id = ? AND sender_id = ?',
-      [userId, otherUserId]
+      [userId, parsedOtherUserId]
     );
     
     // Get total count
     const [countResult] = await promisePool.query(
       `SELECT COUNT(*) as total FROM messages 
        WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)`,
-      [userId, otherUserId, otherUserId, userId]
+      [userId, parsedOtherUserId, parsedOtherUserId, userId]
     );
     
     res.json({
       success: true,
       data: {
-        messages: messages.reverse(), // Reverse to show oldest first
+  messages: messages.reverse(), // Reverse to show oldest first
         pagination: {
           page: parseInt(page),
           limit: limitNum,

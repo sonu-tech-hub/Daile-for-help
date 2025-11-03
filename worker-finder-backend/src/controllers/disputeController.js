@@ -7,11 +7,23 @@ const createDispute = async (req, res) => {
   try {
     const raisedBy = req.user.id;
     const { job_id, against_user, reason, description } = req.body;
+
+    // Coerce and validate numeric inputs early to provide clear errors
+    const jobIdNum = job_id === undefined || job_id === null ? NaN : parseInt(job_id, 10);
+    const againstUserNum = against_user === undefined || against_user === null ? NaN : parseInt(against_user, 10);
+
+    if (Number.isNaN(jobIdNum)) {
+      return res.status(400).json({ success: false, message: 'Invalid job_id: must be a numeric ID' });
+    }
+
+    if (Number.isNaN(againstUserNum)) {
+      return res.status(400).json({ success: false, message: 'Invalid against_user: must be a numeric user ID' });
+    }
     
     // Check if job exists
     const [jobs] = await promisePool.query(
       'SELECT * FROM jobs WHERE id = ? AND (seeker_id = ? OR worker_id = ?)',
-      [job_id, raisedBy, raisedBy]
+      [jobIdNum, raisedBy, raisedBy]
     );
     
     if (jobs.length === 0) {
@@ -24,13 +36,21 @@ const createDispute = async (req, res) => {
     // Check if dispute already exists for this job
     const [existingDisputes] = await promisePool.query(
       'SELECT id FROM disputes WHERE job_id = ? AND status IN ("open", "under_review")',
-      [job_id]
+      [jobIdNum]
     );
     
     if (existingDisputes.length > 0) {
       return res.status(400).json({
         success: false,
         message: 'A dispute already exists for this job'
+      });
+    }
+
+    // Prevent users from raising disputes against themselves
+    if (parseInt(againstUserNum, 10) === parseInt(raisedBy, 10)) {
+      return res.status(400).json({
+        success: false,
+        message: 'You cannot raise a dispute against yourself'
       });
     }
     
@@ -46,8 +66,8 @@ const createDispute = async (req, res) => {
     // Create dispute
     const [result] = await promisePool.query(
       `INSERT INTO disputes (job_id, raised_by, against_user, reason, description, evidence_photos)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [job_id, raisedBy, against_user, reason, description, JSON.stringify(evidenceUrls)]
+        VALUES (?, ?, ?, ?, ?, ?)`,
+      [jobIdNum, raisedBy, againstUserNum, reason, description, JSON.stringify(evidenceUrls)]
     );
     
     // Update job status
@@ -60,7 +80,7 @@ const createDispute = async (req, res) => {
     await promisePool.query(
       `INSERT INTO notifications (user_id, title, message, type, reference_id)
        VALUES (?, ?, ?, ?, ?)`,
-      [against_user, 'Dispute Raised', 'A dispute has been raised against you', 'system', result.insertId]
+      [againstUserNum, 'Dispute Raised', 'A dispute has been raised against you', 'system', result.insertId]
     );
     
     res.status(201).json({
@@ -171,9 +191,15 @@ const getUserDisputes = async (req, res) => {
 // Get dispute details
 const getDisputeDetails = async (req, res) => {
   try {
-    const { disputeId } = req.params;
+    const rawDisputeId = req.params.disputeId;
+    // sanitize possible leading colon (clients sometimes send ':1')
+    const disputeId = typeof rawDisputeId === 'string' ? rawDisputeId.replace(/^:/, '') : rawDisputeId;
+    if (!disputeId || !/^\d+$/.test(String(disputeId))) {
+      return res.status(400).json({ success: false, message: 'Invalid disputeId parameter. Use numeric id (e.g. /api/disputes/23)' });
+    }
+    const parsedDisputeId = parseInt(disputeId, 10);
     const userId = req.user.id;
-    
+
     const [disputes] = await promisePool.query(
       `SELECT 
         d.*,
@@ -185,7 +211,7 @@ const getDisputeDetails = async (req, res) => {
       JOIN users u1 ON d.raised_by = u1.id
       JOIN users u2 ON d.against_user = u2.id
       WHERE d.id = ? AND (d.raised_by = ? OR d.against_user = ?)`,
-      [disputeId, userId, userId]
+      [parsedDisputeId, userId, userId]
     );
     
     if (disputes.length === 0) {
@@ -215,23 +241,42 @@ const getDisputeDetails = async (req, res) => {
 // Update dispute (admin only - simplified for now)
 const updateDisputeStatus = async (req, res) => {
   try {
-    const { disputeId } = req.params;
-    const { status, resolution_notes } = req.body;
-    
+    const rawDisputeId = req.params.disputeId;
+    const disputeId = typeof rawDisputeId === 'string' ? rawDisputeId.replace(/^:/, '') : rawDisputeId;
+    if (!disputeId || !/^\d+$/.test(String(disputeId))) {
+      return res.status(400).json({ success: false, message: 'Invalid disputeId parameter. Use numeric id (e.g. /api/disputes/23)' });
+    }
+    const parsedDisputeId = parseInt(disputeId, 10);
+    const userId = req.user.id;
+    const { status, resolution_notes } = req.body || {};
+
+    // Check if dispute exists and user is authorized (parties involved or admin)
+    const [disputes] = await promisePool.query(
+      'SELECT id FROM disputes WHERE id = ? AND (raised_by = ? OR against_user = ?)',
+      [parsedDisputeId, userId, userId]
+    );
+
+    if (disputes.length === 0) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. You are not authorized to update this dispute.'
+      });
+    }
+
     await promisePool.query(
-      `UPDATE disputes SET 
-        status = ?, 
+      `UPDATE disputes SET
+        status = ?,
         resolution_notes = ?,
         resolved_at = CASE WHEN ? IN ('resolved', 'closed') THEN NOW() ELSE NULL END
        WHERE id = ?`,
-      [status, resolution_notes, status, disputeId]
+      [status, resolution_notes, status, parsedDisputeId]
     );
-    
+
     res.json({
       success: true,
       message: 'Dispute status updated successfully'
     });
-    
+
   } catch (error) {
     console.error('Update dispute status error:', error);
     res.status(500).json({

@@ -75,6 +75,7 @@ const getReferralInfo = async (req, res) => {
 const getAllReferrals = async (req, res) => {
   try {
     const userId = req.user.id;
+    console.log('User ID making referral request:', userId);
     const { status, page = 1, limit = 20 } = req.query;
     
     const { limit: limitNum, offset } = paginate(page, limit);
@@ -107,17 +108,23 @@ const getAllReferrals = async (req, res) => {
     params.push(limitNum, offset);
     
     const [referrals] = await promisePool.query(query, params);
-    
+    console.log('Query executed:', query);
+    console.log('Query params:', params);
+    console.log('Referrals result:', referrals);
+
     // Get total count
     let countQuery = 'SELECT COUNT(*) as total FROM referrals WHERE referrer_user_id = ?';
     const countParams = [userId];
-    
+
     if (status) {
       countQuery += ' AND status = ?';
       countParams.push(status);
     }
-    
+
     const [countResult] = await promisePool.query(countQuery, countParams);
+    console.log('Count query:', countQuery);
+    console.log('Count params:', countParams);
+    console.log('Count result:', countResult);
     
     res.json({
       success: true,

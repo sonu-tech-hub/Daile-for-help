@@ -37,6 +37,7 @@ module.exports = (req, res, next) => {
         status: res.statusCode || 200,
         body: safe
       });
+      res._responseLogged = true;
     } catch (err) {
       console.error('responseLogger:error while logging json', err.message);
     }
@@ -46,6 +47,7 @@ module.exports = (req, res, next) => {
   const origSend = res.send.bind(res);
   res.send = (body) => {
     try {
+      if (res._responseLogged) return origSend(body);
       let parsed = body;
       if (typeof body === 'string') {
         try {
@@ -61,6 +63,7 @@ module.exports = (req, res, next) => {
         status: res.statusCode || 200,
         body: safe
       });
+      res._responseLogged = true;
     } catch (err) {
       console.error('responseLogger:error while logging send', err.message);
     }

@@ -340,6 +340,37 @@ const initDatabase = async () => {
     `);
     console.log('✅ Worker Availability table created');
 
+    // Create Job Applications table
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS job_applications (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        job_id INT NOT NULL,
+        worker_id INT NOT NULL,
+        proposal_message TEXT NOT NULL,
+        quoted_price DECIMAL(10,2),
+        status ENUM('pending', 'accepted', 'rejected') DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
+        FOREIGN KEY (worker_id) REFERENCES users(id) ON DELETE CASCADE,
+        INDEX idx_job (job_id),
+        INDEX idx_worker (worker_id),
+        INDEX idx_status (status),
+        UNIQUE KEY unique_job_worker (job_id, worker_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    console.log('✅ Job Applications table created');
+
+    // Sample referrals
+    await connection.query(`
+      INSERT IGNORE INTO referrals (referrer_user_id, referred_user_id, referral_code, bonus_amount, status, completed_at) VALUES
+      (1, 2, 'REF123', 100, 'completed', NOW()),
+      (1, 3, 'REF123', 100, 'pending', NULL),
+      (2, 1, 'SEEK123', 100, 'completed', NOW()),
+      (3, 1, 'REF456', 100, 'pending', NULL)
+    `);
+    console.log('✅ Sample referrals inserted');
+
     console.log('🎉 Database initialization completed successfully!');
     console.log('📊 All tables created with proper indexes and relationships');
 
@@ -352,24 +383,6 @@ const initDatabase = async () => {
     }
   }
 };
-
- await connection.query(`CREATE TABLE IF NOT EXISTS job_applications (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  job_id INT NOT NULL,
-  worker_id INT NOT NULL,
-  proposal_message TEXT NOT NULL,
-  quoted_price DECIMAL(10,2),
-  status ENUM('pending', 'accepted', 'rejected') DEFAULT 'pending',
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
-  FOREIGN KEY (worker_id) REFERENCES users(id) ON DELETE CASCADE,
-  INDEX idx_job (job_id),
-  INDEX idx_worker (worker_id),
-  INDEX idx_status (status),
-  UNIQUE KEY unique_job_worker (job_id, worker_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
- `)
 
 // Run initialization
 initDatabase()

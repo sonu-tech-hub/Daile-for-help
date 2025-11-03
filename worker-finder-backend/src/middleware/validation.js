@@ -5,14 +5,22 @@ const handleValidationErrors = (req, res, next) => {
   const errors = validationResult(req);
   
   if (!errors.isEmpty()) {
-    return res.status(400).json({
+    const errorList = errors.array().map(err => ({ field: err.path, message: err.msg }));
+    const payload = {
       success: false,
       message: 'Validation failed',
-      errors: errors.array().map(err => ({
-        field: err.path,
-        message: err.msg
-      }))
-    });
+      errors: errorList
+    };
+
+    // Include helpful debug info in development so clients can see what was received
+    if (process.env.NODE_ENV === 'development') {
+      payload.debug = {
+        body: req.body && Object.keys(req.body).length ? req.body : undefined,
+        filesCount: req.files ? (Array.isArray(req.files) ? req.files.length : Object.keys(req.files).length) : 0
+      };
+    }
+
+    return res.status(400).json(payload);
   }
   
   next();
@@ -210,8 +218,9 @@ const validateDispute = [
     .withMessage('Valid user ID is required'),
   body('reason')
     .trim()
-    .isLength({ min: 10, max: 500 })
-    .withMessage('Reason is required (10-500 characters)'),
+    // allow slightly shorter reasons (helpful for quick reports) while still blocking empty/too-short inputs
+    .isLength({ min: 5, max: 500 })
+    .withMessage('Reason is required (5-500 characters)'),
   body('description')
     .optional()
     .trim()

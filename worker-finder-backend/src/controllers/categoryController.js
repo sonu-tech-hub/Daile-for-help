@@ -43,10 +43,11 @@ const getAllCategories = async (req, res) => {
 const getCategoryById = async (req, res) => {
   try {
     const { categoryId } = req.params;
+    const cleanCategoryId = categoryId.replace(/^:/, ''); // Remove leading colon if present
     
     const [categories] = await promisePool.query(
       'SELECT * FROM categories WHERE id = ? AND is_active = TRUE',
-      [categoryId]
+      [cleanCategoryId]
     );
     
     if (categories.length === 0) {
